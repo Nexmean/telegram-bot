@@ -14,7 +14,6 @@ categories = ["api-bindings", "asynchronous"]
 license = "MIT"
 
 [dependencies]
-antidote = "1.0"
 tokio-core = "0.1"
 error-chain = "0.11.0"
 futures = "0.1"
@@ -32,5 +31,4 @@ optional = true
 [features]
 default = ["hyper_connector"]
 
-curl_connector = ["curl", "tokio-curl"]
 hyper_connector = ["hyper", "hyper-tls"]
