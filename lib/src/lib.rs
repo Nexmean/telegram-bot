@@ -8,11 +8,6 @@ extern crate futures;
 extern crate tokio_core;
 extern crate telegram_bot_raw;
 
-#[cfg(feature = "curl_connector")]
-extern crate curl;
-#[cfg(feature = "curl_connector")]
-extern crate tokio_curl;
-
 #[cfg(feature = "hyper_connector")]
 extern crate hyper;
 #[cfg(feature = "hyper_connector")]
