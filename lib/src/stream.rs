@@ -3,14 +3,14 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use futures::{Future, Stream, Poll, Async};
-use futures::future;
-use tokio_core::reactor::{Handle, Timeout};
+use tokio::timer::Delay;
 
 use telegram_bot_raw::{GetUpdates, Update, Integer};
 
 use api::Api;
 use errors::Error;
 use future::{TelegramFuture, NewTelegramFuture};
+use std::time::Instant;
 
 const TELEGRAM_LONG_POLL_TIMEOUT_SECONDS: u64 = 5;
 const TELEGRAM_LONG_POLL_ERROR_DELAY_MILLISECONDS: u64 = 500;
@@ -20,7 +20,6 @@ const TELEGRAM_LONG_POLL_ERROR_DELAY_MILLISECONDS: u64 = 500;
 #[must_use = "streams do nothing unless polled"]
 pub struct UpdatesStream {
     api: Api,
-    handle: Handle,
     last_update: Integer,
     buffer: VecDeque<Update>,
     current_request: Option<TelegramFuture<Option<Vec<Update>>>>,
@@ -58,11 +57,10 @@ impl Stream for UpdatesStream {
 
         match result {
             Err(err) => {
-                let timeout_future = future::result(Timeout::new(self.error_delay, &self.handle));
+                let instant_delay = Delay::new(Instant::now() + self.error_delay);
+                let timeout_future = instant_delay;
 
-                let timeout_future = timeout_future.map_err(From::from).and_then(|timeout| {
-                    timeout.map_err(From::from).map(|()| None)
-                });
+                let timeout_future = timeout_future.map_err(From::from).map(|_| None);
 
                 self.current_request = Some(TelegramFuture::new(Box::new(timeout_future)));
                 return Err(err)
@@ -87,14 +85,13 @@ impl Stream for UpdatesStream {
 }
 
 pub trait NewUpdatesStream {
-    fn new(api: Api, handle: Handle) -> Self;
+    fn new(api: Api) -> Self;
 }
 
 impl NewUpdatesStream for UpdatesStream{
-    fn new(api: Api, handle: Handle) -> Self {
+    fn new(api: Api) -> Self {
         UpdatesStream {
-            api: api,
-            handle: handle,
+            api,
             last_update: 0,
             buffer: VecDeque::new(),
             current_request: None,

@@ -14,21 +14,18 @@ categories = ["api-bindings", "asynchronous"]
 license = "MIT"
 
 [dependencies]
-tokio-core = "0.1"
+tokio = "0.1.7"
 error-chain = "0.11.0"
 futures = "0.1"
 
 telegram-bot-raw = { version = "=0.6.1", path = "../raw" }
 
 [dependencies.hyper]
-version = "0.11"
-optional = true
+version = "0.12"
+
+[dependencies.http]
+version = "0.1.5"
 
 [dependencies.hyper-tls]
-version = "0.1"
-optional = true
+version = "0.2"
 
-[features]
-default = ["hyper_connector"]
-
-hyper_connector = ["hyper", "hyper-tls"]

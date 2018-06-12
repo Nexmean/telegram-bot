@@ -4,12 +4,11 @@
 #[macro_use]
 extern crate error_chain;
 extern crate futures;
-extern crate tokio_core;
+extern crate tokio;
 extern crate telegram_bot_raw;
 
-#[cfg(feature = "hyper_connector")]
+extern crate http;
 extern crate hyper;
-#[cfg(feature = "hyper_connector")]
 extern crate hyper_tls;
 
 mod api;

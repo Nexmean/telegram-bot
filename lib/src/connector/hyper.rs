@@ -2,16 +2,15 @@
 
 use std::fmt;
 use std::str::FromStr;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use futures::{Future, Stream};
-use futures::future::result;
+use futures::future::{self, result};
 use hyper;
 use hyper::{Method, Uri};
-use hyper::client::{Client, Connect};
-use hyper::header::ContentType;
+use hyper::client::Client;
+use hyper::client::connect::Connect;
 use hyper_tls::HttpsConnector;
-use tokio_core::reactor::Handle;
 
 use telegram_bot_raw::{HttpRequest, HttpResponse, Method as TelegramMethod, Body as TelegramBody};
 
@@ -22,7 +21,7 @@ use super::_base::Connector;
 
 /// This connector uses `hyper` backend.
 pub struct HyperConnector<C> {
-    inner: Rc<Client<C>>
+    inner: Arc<Client<C>>
 }
 
 impl<C> fmt::Debug for HyperConnector<C> {
@@ -34,58 +33,65 @@ impl<C> fmt::Debug for HyperConnector<C> {
 impl<C> HyperConnector<C> {
     pub fn new(client: Client<C>) -> Self {
         HyperConnector {
-            inner: Rc::new(client)
+            inner: Arc::new(client)
         }
     }
 }
 
-impl<C: Connect> Connector for HyperConnector<C> {
+impl<C: Connect + 'static> Connector for HyperConnector<C> {
     fn request(&self, token: &str, req: HttpRequest) -> TelegramFuture<HttpResponse> {
-        let uri = result(Uri::from_str(&req.url.url(token))).map_err(From::from);
+        let uri = match Uri::from_str(&req.url.url(token)) {
+            Ok(uri) => uri,
+            Err(error) => return TelegramFuture::new(Box::new(future::err(error.into())))
+        };
 
         let client = self.inner.clone();
-        let request = uri.and_then(move |uri| {
-            let method = match req.method {
-                TelegramMethod::Get => Method::Get,
-                TelegramMethod::Post => Method::Post,
-            };
-            let mut http_request = hyper::client::Request::new(method, uri);
 
-            match req.body {
-                TelegramBody::Empty => (),
-                TelegramBody::Json(body) => {
-                    http_request.set_body(body);
-                    http_request.headers_mut().set(ContentType::json());
-                }
-                body => panic!("Unknown body type {:?}", body)
-            }
+        let method = match req.method {
+            TelegramMethod::Get => Method::GET,
+            TelegramMethod::Post => Method::POST,
+        };
 
-            client.request(http_request).map_err(From::from)
-        });
+        let mut request_builder = hyper::Request::builder();
+        request_builder
+            .method(method)
+            .uri(uri);
 
-        let future = request.and_then(move |response| {
-            response.body().map_err(From::from)
-                .fold(vec![], |mut result, chunk| -> Result<Vec<u8>, Error> {
-                    result.extend_from_slice(&chunk);
-                    Ok(result)
+        let http_request = match req.body {
+            TelegramBody::Empty => request_builder.body(hyper::Body::empty()),
+            TelegramBody::Json(body) => request_builder
+                .header("Content-Type", "application/json")
+                .body(body.into()),
+            body => panic!("Unknown body type {:?}", body),
+        };
+
+        let request = result(http_request).map_err(|e| -> Error { e.into() })
+            .and_then(move |http_request| {
+                client.request(http_request).map_err(From::from)
+            });
+
+        let future = request
+            .and_then(move |response| {
+                response.into_body().map_err(From::from)
+                    .fold(vec![], |mut result, chunk| -> Result<Vec<u8>, Error> {
+                        result.extend_from_slice(&chunk);
+                        Ok(result)
+                    })
             })
-        });
-
-        let future = future.and_then(|body| {
-            Ok(HttpResponse {
-                body: Some(body),
-            })
-        });
+            .and_then(|body| {
+                Ok(HttpResponse {
+                    body: Some(body),
+                })
+            });
 
         TelegramFuture::new(Box::new(future))
     }
 }
 
 /// Returns default hyper connector. Uses one resolve thread and `HttpsConnector`.
-pub fn default_connector(handle: &Handle) -> Result<Box<Connector>, Error> {
-    let connector = HttpsConnector::new(1, handle).map_err(|err| {
-        ::std::io::Error::new(::std::io::ErrorKind::Other, format!("tls error: {}", err))
-    })?;
-    let config = Client::configure().connector(connector);
-    Ok(Box::new(HyperConnector::new(config.build(handle))))
+pub fn default_connector() -> Result<Box<Connector>, Error> {
+    let connector = HttpsConnector::new(1)?;
+    let client = Client::builder()
+        .build::<_, hyper::Body>(connector);
+    Ok(Box::new(HyperConnector::new(client)))
 }

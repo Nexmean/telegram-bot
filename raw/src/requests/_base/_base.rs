@@ -9,14 +9,14 @@ pub trait RequestType {
 }
 
 pub trait ResponseType {
-    type Type;
+    type Type: Send;
 
     fn deserialize(resp: HttpResponse) -> Result<Self::Type, Error>;
 }
 
 pub trait Request {
     type Type: RequestType;
-    type Response: ResponseType + 'static;
+    type Response: ResponseType + Send + 'static;
 
     fn serialize(&self) -> Result<HttpRequest, Error>;
 
@@ -51,7 +51,7 @@ pub struct DetachedRequest<Resp> {
     phantom: ::std::marker::PhantomData<Resp>,
 }
 
-impl<Resp: ResponseType + 'static> Request for DetachedRequest<Resp> {
+impl<Resp: ResponseType + Send + 'static> Request for DetachedRequest<Resp> {
     type Type = DetachedRequestType;
     type Response = Resp;
 

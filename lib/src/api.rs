@@ -1,10 +1,9 @@
-use std::borrow::Borrow;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{Future};
-use futures::future::{result};
-use tokio_core::reactor::{Handle, Timeout};
+use futures::Future;
+use futures::future;
+use tokio::timer::Delay;
 
 use telegram_bot_raw::{Request, ResponseType};
 
@@ -12,23 +11,23 @@ use connector::{Connector, default_connector};
 use errors::Error;
 use future::{TelegramFuture, NewTelegramFuture};
 use stream::{NewUpdatesStream, UpdatesStream};
+use std::time::Instant;
 
 /// Main type for sending requests to the Telegram bot API.
 #[derive(Clone)]
 pub struct Api {
-    inner: Rc<ApiInner>,
+    inner: Arc<ApiInner>,
 }
 
 struct ApiInner {
     token: String,
     connector: Box<Connector>,
-    handle: Handle,
 }
 
 #[derive(Debug)]
 pub enum ConnectorConfig {
     Default,
-    Specified(Box<Connector>)
+    Specified(Box<Connector>),
 }
 
 impl Default for ConnectorConfig {
@@ -42,9 +41,9 @@ impl ConnectorConfig {
         ConnectorConfig::Specified(connector)
     }
 
-    pub fn take(self, handle: &Handle) -> Result<Box<Connector>, Error> {
+    pub fn take(self) -> Result<Box<Connector>, Error> {
         match self {
-            ConnectorConfig::Default => default_connector(&handle),
+            ConnectorConfig::Default => default_connector(),
             ConnectorConfig::Specified(connector) => Ok(connector)
         }
     }
@@ -67,13 +66,11 @@ impl Config {
     }
 
     /// Create new `Api` instance.
-    pub fn build<H: Borrow<Handle>>(self, handle: H) -> Result<Api, Error> {
-        let handle = handle.borrow().clone();
+    pub fn build(self) -> Result<Api, Error> {
         Ok(Api {
-            inner: Rc::new(ApiInner {
+            inner: Arc::new(ApiInner {
                 token: self.token,
-                connector: self.connector.take(&handle)?,
-                handle: handle,
+                connector: self.connector.take()?,
             }),
         })
     }
@@ -150,7 +147,7 @@ impl Api {
     /// # }
     /// ```
     pub fn stream(&self) -> UpdatesStream {
-        UpdatesStream::new(self.clone(), self.inner.handle.clone())
+        UpdatesStream::new(self.clone())
     }
 
     /// Send a request to the Telegram server and do not wait for a response.
@@ -175,9 +172,9 @@ impl Api {
     /// api.spawn(chat.text("Message"))
     /// # }
     /// # }
-    pub fn spawn<Req: Request>(&self, request: Req) {
-        self.inner.handle.spawn(self.send(request).then(|_| Ok(())))
-    }
+//    pub fn spawn<Req: Request>(&self, request: Req) {
+//        self.inner.handle.spawn(self.send(request).then(|_| Ok(())))
+//    }
 
     /// Send a request to the Telegram server and wait for a response, timing out after `duration`.
     /// Future will resolve to `None` if timeout fired.
@@ -207,9 +204,8 @@ impl Api {
     pub fn send_timeout<Req: Request>(
         &self, request: Req, duration: Duration)
         -> TelegramFuture<Option<<Req::Response as ResponseType>::Type>> {
-
-        let timeout_future = result(Timeout::new(duration, &self.inner.handle))
-            .flatten().map_err(From::from).map(|()| None);
+        let timeout_future = Delay::new(Instant::now() + duration)
+            .map_err(From::from).map(|()| None);
         let send_future = self.send(request).map(|resp| Some(resp));
 
         let future = timeout_future.select(send_future)
@@ -242,18 +238,18 @@ impl Api {
     /// # }
     /// ```
     pub fn send<Req: Request>(&self, request: Req)
-        -> TelegramFuture<<Req::Response as ResponseType>::Type> {
-
+                              -> TelegramFuture<<Req::Response as ResponseType>::Type> {
         let request = request.serialize()
             .map_err(From::from);
 
-        let request = result(request);
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => return TelegramFuture::new(Box::new(future::err(error))),
+        };
 
         let api = self.clone();
-        let response = request.and_then(move |request| {
-            let ref token = api.inner.token;
-            api.inner.connector.request(token, request)
-        });
+        let ref token = api.inner.token;
+        let response = api.inner.connector.request(token, request);
 
         let future = response.and_then(move |response| {
             Req::Response::deserialize(response).map_err(From::from)
