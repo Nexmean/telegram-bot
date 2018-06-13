@@ -1,20 +1,22 @@
 extern crate futures;
 extern crate telegram_bot;
-extern crate tokio_core;
+extern crate tokio;
 
 use std::env;
 
-use futures::Stream;
-use tokio_core::reactor::Core;
+use futures::{Future, Stream};
 use telegram_bot::*;
 
 fn process(api: Api, message: Message) {
     if let MessageKind::Text { ref data, .. } = message.kind {
         match data.as_str() {
-            "/pin" => message.reply_to_message.map(|message| api.spawn(message.pin())).unwrap_or(()),
+            "/pin" => {
+                message.reply_to_message
+                    .map(|message| tokio::spawn(api.send(message.pin()).map_err(|_| ())));
+            }
             "/unpin" => {
-                api.spawn(message.chat.unpin_message())
-            },
+                tokio::spawn(api.send(message.chat.unpin_message()).map_err(|_| ()));
+            }
             _ => ()
         }
     }
@@ -24,16 +26,15 @@ fn process(api: Api, message: Message) {
 fn main() {
     let token = env::var("TELEGRAM_BOT_TOKEN").unwrap();
 
-    let mut core = Core::new().unwrap();
+    let api = Api::configure(token).build().unwrap();
 
-    let api = Api::configure(token).build(core.handle()).unwrap();
-
-    let future = api.stream().for_each(|update| {
+    let future = api.stream().for_each(move |update| {
         if let UpdateKind::Message(message) = update.kind {
             process(api.clone(), message)
         }
         Ok(())
-    });
+    })
+        .map_err(|e| panic!("Error during taking updates: {:?}", e));
 
-    core.run(future).unwrap();
+    tokio::run(future);
 }
