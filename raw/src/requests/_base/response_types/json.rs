@@ -49,8 +49,8 @@ impl<Resp: JsonResponse> ResponseType for Resp where <Resp as JsonResponse>::Raw
                 },
                 ResponseWrapper::Error { description, parameters } => {
                     Err(ErrorKind::TelegramError {
-                        description: description,
-                        parameters: parameters
+                        description,
+                        parameters
                     }.into())
                 },
             }

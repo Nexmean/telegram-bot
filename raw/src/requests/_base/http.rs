@@ -27,8 +27,6 @@ pub enum Method {
 pub enum Body {
     Empty,
     Json(Vec<u8>),
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]

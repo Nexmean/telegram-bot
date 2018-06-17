@@ -62,7 +62,6 @@ impl<C: Connect + 'static> Connector for HyperConnector<C> {
             TelegramBody::Json(body) => request_builder
                 .header("Content-Type", "application/json")
                 .body(body.into()),
-            body => panic!("Unknown body type {:?}", body),
         };
 
         let request = result(http_request).map_err(|e| -> Error { e.into() })
